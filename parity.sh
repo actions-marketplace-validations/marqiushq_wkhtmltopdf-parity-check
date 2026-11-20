@@ -44,7 +44,7 @@ split() {
     tmp="$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/parity-words.XXXXXX")"
     LEFTOVERS+=("$tmp")
     LEFTOVERS+=("$tmp.err")
-    printf '%s\n' "$1" | xargs printf '%s\0' > "$tmp" 2> "$tmp.err" || fail "$2: $(cat "$tmp.err") (quote a value that has spaces, and close every quote)"
+    printf '%s\n' "$1" | xargs printf '%s\0' > "$tmp" 2> "$tmp.err" || fail "$2: a quote is not closed (quote a value that has spaces, and close every quote)"
     while IFS= read -r -d '' word; do WORDS+=("$word"); done < "$tmp"
 }
 
