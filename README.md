@@ -1,6 +1,6 @@
-# wkhtmltopdf parity check
+# wkhtmltopdf parity check: compare PDFs
 
-**Will your PDFs change if you replace wkhtmltopdf?** This GitHub Action answers with evidence, on every pull request. It makes your own HTML templates into PDFs with wkhtmltopdf 0.12.6 and with marqius-wkhtmltopdf, the maintained drop-in replacement, compares every page, and fails the build on the differences you choose. The invoices, statements and reports your customers receive are checked before the switch, not after.
+**Replacing wkhtmltopdf? Compare every PDF before you switch.** This GitHub Action makes your own HTML templates into PDFs with wkhtmltopdf 0.12.6 and with marqius-wkhtmltopdf, the maintained drop-in wkhtmltopdf alternative, compares every page, posts the result on the pull request and fails the build on the differences you choose. The invoices, quotations, statements and reports your customers receive are proven before the switch, not after it.
 
 ```yaml
 name: PDF parity
@@ -28,6 +28,8 @@ Name your templates in `pages` and the options your application passes in `optio
 - **A note where it matters:** each page that differs gets an annotation on its file with its most serious difference, such as `1,234.50 is now 1,234.60 (+0.10)`, in the run's summary and beside the file in a pull request that changes it.
 - **The evidence:** the artifact `wkhtmltopdf-parity` holds both PDFs of every page, marked-up copies of those that differ, with a frame and a note at each difference, pictures of those pages side by side, and the whole comparison as CSV and JSON.
 - **The time each program took** to convert your pages, side by side on the runner.
+
+It reads what the pages say as well as how they look: a total that changed, a word that went missing, a table row that moved to the next page, a header or footer that shifted, another typeface. Where a picture comparison shows only that pixels changed, it names the difference.
 
 ## A fair comparison
 
@@ -82,6 +84,18 @@ For a first look, let the job carry on and show the decision:
   env:
     DECISION: ${{ steps.parity.outputs.decision }}
 ```
+
+## Questions
+
+**How do I test a migration from wkhtmltopdf?** Put the HTML of the documents your application prints in the repository, name them in `pages` with the options your application passes, and add the workflow at the top of this page. Each pull request then shows which pages would change, and how.
+
+**How do I compare two PDFs in GitHub Actions?** This action compares the PDFs it makes. To compare PDFs you already have, install the program with [setup-marqius-wkhtmltopdf](https://github.com/marqiushq/setup-marqius-wkhtmltopdf) and run `marqius-wkhtmltopdf compare old.pdf new.pdf`, or `compare old/ new/ -o report/` for two folders.
+
+**Can I check Odoo reports?** Yes. Save the HTML of each report you print, with its style sheets, in the repository and name it in `pages`. Odoo 19 and 20 print their reports with marqius-wkhtmltopdf as they do with wkhtmltopdf.
+
+**Do my templates leave the runner?** No. Both programs convert with no network, unless you set `network: true`, and the report stays with your workflow's run.
+
+**Why wkhtmltopdf 0.12.6?** It is wkhtmltopdf's last release, from 2020, and the one most teams run; its project has since been archived. With `baseline`, you compare with whichever wkhtmltopdf your servers run.
 
 ## Inputs
 

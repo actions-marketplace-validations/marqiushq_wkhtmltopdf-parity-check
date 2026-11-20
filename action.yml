@@ -1,5 +1,5 @@
-name: wkhtmltopdf parity check
-description: "Before you replace wkhtmltopdf, prove your PDFs: your HTML through wkhtmltopdf and marqius-wkhtmltopdf, every page compared"
+name: "wkhtmltopdf parity check: compare PDFs"
+description: "Compare every PDF your HTML templates make with wkhtmltopdf and marqius-wkhtmltopdf, in each pull request, before you switch"
 author: Simple AI LLC
 branding:
   icon: check-square
