@@ -1,0 +1,322 @@
+# Tests the action on every kind of runner it supports, and runs the README's examples as printed:
+#
+#   on a push or pull request   this commit's action, with the latest release of marqius-wkhtmltopdf
+#   every hour                  the same tests, as soon as marqius.com has a release no run has
+#                               passed yet; a release that passed is remembered in the Actions cache
+#   by hand                     Actions > Test > Run workflow
+#
+# The README's first example is the workflow parity.yml; the others are in the job "README" here,
+# and use the published v1 of this action. test/readme.py fails the run when one is missing.
+name: Test
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "47 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  OPTIONS: --page-size A4 --margin-top 12mm --enable-local-file-access
+
+jobs:
+  release:
+    name: Latest release
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.latest.outputs.version }}
+      test: ${{ steps.decide.outputs.test }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Every example in the README runs in a workflow
+        run: python3 test/readme.py README.md .github/workflows/parity.yml .github/workflows/test.yml
+      - id: latest
+        name: The latest release on marqius.com
+        run: |
+          version="$(curl -fsSL --retry 5 --retry-all-errors https://marqius.com/download/marqius-wkhtmltopdf/latest | tr -d '[:space:]')"
+          [[ "$version" =~ ^[0-9]+(\.[0-9]+)+$ ]] || { echo "::error::marqius.com does not say which release is the latest"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "marqius-wkhtmltopdf $version"
+      - id: tested
+        if: github.event_name == 'schedule'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .passed
+          key: passed-${{ steps.latest.outputs.version }}
+          lookup-only: true
+      - id: decide
+        name: Test it now?
+        env:
+          EVENT: ${{ github.event_name }}
+          PASSED: ${{ steps.tested.outputs.cache-hit }}
+          VERSION: ${{ steps.latest.outputs.version }}
+        run: |
+          if [ "$EVENT" = schedule ] && [ "$PASSED" = true ]; then
+            echo "marqius-wkhtmltopdf $VERSION has passed already: nothing to test"
+            echo "test=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "test=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  docker:
+    name: wkhtmltopdf in Docker, ${{ matrix.runner }}
+    needs: release
+    if: needs.release.outputs.test == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, ubuntu-22.04, ubuntu-26.04]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - id: templates
+        name: The sample templates pass
+        uses: ./
+        with:
+          comment: false
+          pages: templates/*.html
+          options: ${{ env.OPTIONS }}
+          report: report-templates-${{ matrix.runner }}
+      - shell: bash
+        env:
+          VERDICT: ${{ steps.templates.outputs.verdict }}
+          DECISION: ${{ steps.templates.outputs.decision }}
+          REPORT: ${{ steps.templates.outputs.report }}
+        run: |
+          bash test/check.sh passed
+          bash test/check.sh only invoice letter receipt report
+          bash test/check.sh system "wkhtmltopdf 0.12.6 (with patched qt)"
+          bash test/check.sh system "compatible; marqius-wkhtmltopdf ${{ needs.release.outputs.version }}"
+
+      - id: no-charset
+        name: A page with no character set fails, as wkhtmltopdf garbles its letters
+        continue-on-error: true
+        uses: ./
+        with:
+          comment: false
+          pages: test/no-charset/no-charset.html
+          options: --enable-local-file-access
+          report: report-no-charset-${{ matrix.runner }}
+      - shell: bash
+        env:
+          OUTCOME: ${{ steps.no-charset.outcome }}
+          VERDICT: ${{ steps.no-charset.outputs.verdict }}
+          DECISION: ${{ steps.no-charset.outputs.decision }}
+          REPORT: ${{ steps.no-charset.outputs.report }}
+        run: |
+          bash test/check.sh failed
+          bash test/check.sh only no-charset
+
+      - name: A fonts folder for both programs
+        run: bash test/check.sh fonts "$RUNNER_TEMP/fonts"
+      - id: options
+        name: Nested folders, a space in a name, a footer named in the options, quoted options, fonts
+        uses: ./
+        with:
+          comment: false
+          pages: |
+            test/pages/**/*.html
+          options: --page-size A4 --footer-html test/pages/orders/footer.html --title "Order 7"
+          fonts: ${{ runner.temp }}/fonts
+          report: out/report-options-${{ matrix.runner }}
+      - shell: bash
+        env:
+          VERDICT: ${{ steps.options.outputs.verdict }}
+          DECISION: ${{ steps.options.outputs.decision }}
+          REPORT: ${{ steps.options.outputs.report }}
+        run: |
+          [ "$REPORT" = "out/report-options-${{ matrix.runner }}" ] || { echo "::error::report is '$REPORT'"; exit 1; }
+          bash test/check.sh passed
+          bash test/check.sh only "orders/order 7" letters/letter
+          bash test/check.sh system "with 1 font files from the fonts folder"
+
+  baseline:
+    name: Against a baseline, ${{ matrix.runner }}
+    needs: release
+    if: needs.release.outputs.test == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: baseline
+        uses: ./
+        with:
+          comment: false
+          pages: templates/*.html
+          options: ${{ env.OPTIONS }}
+          baseline: templates/made-by-wkhtmltopdf
+          report: report-baseline-${{ matrix.runner }}
+      - shell: bash
+        env:
+          VERDICT: ${{ steps.baseline.outputs.verdict }}
+          DECISION: ${{ steps.baseline.outputs.decision }}
+          REPORT: ${{ steps.baseline.outputs.report }}
+        run: |
+          [ "$VERDICT" = pass ] || { echo "::error::the verdict is '$VERDICT'"; exit 1; }
+          bash test/check.sh only invoice letter receipt report
+          echo "$DECISION"
+
+  refusals:
+    name: Refuses ${{ matrix.case }}
+    needs: release
+    if: needs.release.outputs.test == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - case: Docker on a Mac
+            runner: macos-15
+            says: which needs a Linux runner
+          - case: a level that is not one
+            runner: ubuntu-24.04
+            fail-on: severe
+            says: fail-on is blocking, review or cosmetic
+          - case: pages that match nothing
+            runner: ubuntu-24.04
+            pages: nothing/*.html
+            says: "pages: no file matches 'nothing/*.html'"
+          - case: a baseline without the pages' PDFs
+            runner: ubuntu-24.04
+            pages: test/pages/**/*.html
+            baseline: templates/made-by-wkhtmltopdf
+            says: "baseline: no PDF for 3 of the pages"
+          - case: an unclosed quote in the options
+            runner: ubuntu-24.04
+            options: --title "Order 7
+            says: close every quote
+          - case: a report folder outside the repository
+            runner: ubuntu-24.04
+            report: ../elsewhere
+            says: report is a folder inside the repository's folder
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: check
+        continue-on-error: true
+        uses: ./
+        with:
+          comment: false
+          pages: ${{ matrix.pages || 'templates/*.html' }}
+          options: ${{ matrix.options }}
+          fail-on: ${{ matrix.fail-on || 'blocking' }}
+          baseline: ${{ matrix.baseline }}
+          report: ${{ matrix.report || 'wkhtmltopdf-parity' }}
+      - name: Refused, saying why
+        shell: bash
+        env:
+          OUTCOME: ${{ steps.check.outcome }}
+          PARITY_PAGES: ${{ matrix.pages || 'templates/*.html' }}
+          PARITY_OPTIONS: ${{ matrix.options }}
+          PARITY_FAIL_ON: ${{ matrix.fail-on || 'blocking' }}
+          PARITY_BASELINE: ${{ matrix.baseline }}
+          PARITY_REPORT: ${{ matrix.report || 'wkhtmltopdf-parity' }}
+          SAYS: ${{ matrix.says }}
+        run: bash test/check.sh refused "$SAYS"
+
+  readme:
+    name: README
+    needs: release
+    if: needs.release.outputs.test == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Choose what fails the build
+      - uses: marqiushq/wkhtmltopdf-parity-check@v1
+        with:
+          pages: templates/*.html
+          options: --page-size A4 --margin-top 12mm --enable-local-file-access
+          fail-on: cosmetic
+          compare-options: --ignore-kind metadata --move 2
+      # Report without failing the build
+      - id: parity
+        uses: marqiushq/wkhtmltopdf-parity-check@v1
+        continue-on-error: true
+        with:
+          pages: templates/*.html
+      - run: echo "$DECISION"
+        env:
+          DECISION: ${{ steps.parity.outputs.decision }}
+      - name: The decision was given, and the job carried on
+        env:
+          DECISION: ${{ steps.parity.outputs.decision }}
+        run: '[ -n "$DECISION" ]'
+
+  readme-baseline:
+    name: README, a baseline, ${{ matrix.runner }}
+    needs: release
+    if: needs.release.outputs.test == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Compare with the PDFs your servers make
+      - uses: marqiushq/wkhtmltopdf-parity-check@v1
+        with:
+          pages: templates/*.html
+          options: --page-size A4 --margin-top 12mm --enable-local-file-access
+          baseline: templates/made-by-wkhtmltopdf
+
+  comment:
+    name: The comment on a pull request
+    needs: release
+    if: needs.release.outputs.test == 'true' && github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: first
+        name: A comment on the pull request
+        continue-on-error: true
+        uses: ./
+        with:
+          pages: |
+            templates/*.html
+            test/no-charset/no-charset.html
+          options: --enable-local-file-access
+          report: report-comment
+      - id: second
+        name: The same comment, updated
+        continue-on-error: true
+        uses: ./
+        with:
+          pages: |
+            templates/*.html
+            test/no-charset/no-charset.html
+          options: --enable-local-file-access
+          report: report-comment
+      - name: One comment, with the result, the changed pages marked
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          FIRST: ${{ steps.first.outputs.verdict }}
+          SECOND: ${{ steps.second.outputs.verdict }}
+        run: bash test/check.sh comment report-comment
+
+  passed:
+    name: Remember the release that passed
+    needs: [release, docker, baseline, refusals, readme, readme-baseline, comment]
+    if: always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.docker.result == 'success' && github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "${{ needs.release.outputs.version }}" > .passed
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .passed
+          key: passed-${{ needs.release.outputs.version }}

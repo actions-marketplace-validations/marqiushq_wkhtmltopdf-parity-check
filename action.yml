@@ -1,0 +1,114 @@
+name: wkhtmltopdf parity check
+description: "Before you replace wkhtmltopdf, prove your PDFs: your HTML through wkhtmltopdf and marqius-wkhtmltopdf, every page compared"
+author: Simple AI LLC
+branding:
+  icon: check-square
+  color: green
+
+inputs:
+  pages:
+    description: "The HTML pages to convert, inside the repository; paths or patterns such as templates/*.html, one to a line"
+    required: true
+  options:
+    description: "The wkhtmltopdf options your application passes, as on a command line (quotes work as in a shell)"
+    required: false
+    default: ""
+  fail-on:
+    description: "The level of difference that fails the check, as marqius-wkhtmltopdf compare names them - blocking (the content differs), review or cosmetic"
+    required: false
+    default: blocking
+  compare-options:
+    description: "Options for marqius-wkhtmltopdf compare, such as --ignore-kind metadata or --level font=blocking, to choose which differences count"
+    required: false
+    default: ""
+  baseline:
+    description: "A folder of PDFs your current wkhtmltopdf made, named like the pages (invoice.html gives invoice.pdf). Without it, wkhtmltopdf 0.12.6 makes them here, in Docker"
+    required: false
+    default: ""
+  fonts:
+    description: "A folder of fonts your servers have, for both programs (.ttf, .otf, .ttc)"
+    required: false
+    default: ""
+  network:
+    description: "true lets both programs load files from the internet; by default they convert with no network"
+    required: false
+    default: "false"
+  version:
+    description: "The release of marqius-wkhtmltopdf to test, such as 0.12.9, or latest"
+    required: false
+    default: latest
+  report:
+    description: "The folder for the report, inside the repository's folder; the artifact takes its name"
+    required: false
+    default: wkhtmltopdf-parity
+  comment:
+    description: "true posts the result on the pull request, as one comment that each later run updates (the workflow needs permissions: pull-requests: write)"
+    required: false
+    default: "true"
+  token:
+    description: "The token that posts the comment"
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  verdict:
+    description: "pass, or fail when a difference at the fail-on level or above was found"
+    value: ${{ steps.check.outputs.verdict }}
+  decision:
+    description: "The comparison's decision for all the pages, such as GO, REVIEW or NO-GO with what it is based on"
+    value: ${{ steps.check.outputs.decision }}
+  report:
+    description: "The folder the report is in"
+    value: ${{ steps.check.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - id: setup
+      uses: marqiushq/setup-marqius-wkhtmltopdf@v1
+      with:
+        version: ${{ inputs.version }}
+
+    - id: check
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/parity.sh"
+      env:
+        PARITY_PROGRAM: ${{ steps.setup.outputs.path }}
+        PARITY_VERSION: ${{ steps.setup.outputs.version }}
+        PARITY_PAGES: ${{ inputs.pages }}
+        PARITY_OPTIONS: ${{ inputs.options }}
+        PARITY_FAIL_ON: ${{ inputs.fail-on }}
+        PARITY_COMPARE_OPTIONS: ${{ inputs.compare-options }}
+        PARITY_BASELINE: ${{ inputs.baseline }}
+        PARITY_FONTS: ${{ inputs.fonts }}
+        PARITY_NETWORK: ${{ inputs.network }}
+        PARITY_REPORT: ${{ inputs.report }}
+        PARITY_COMMENT: ${{ inputs.comment }}
+
+    - id: upload
+      if: always() && steps.check.outputs.report != ''
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: ${{ steps.check.outputs.artifact }}
+        path: ${{ steps.check.outputs.report }}
+        if-no-files-found: ignore
+
+    - if: always() && steps.check.outputs.report != ''
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/comment.sh"
+      env:
+        COMMENT: ${{ inputs.comment }}
+        TOKEN: ${{ inputs.token }}
+        REPORT: ${{ steps.check.outputs.report }}
+        ARTIFACT: ${{ steps.check.outputs.artifact }}
+        ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+
+    # the build fails here, once the report is kept and the comment posted
+    - if: always() && steps.check.outputs.verdict == 'fail'
+      shell: bash
+      run: |
+        echo "::error title=wkhtmltopdf parity check::Differences at the level that fails this check ($FAIL_ON): see the job summary, and both PDFs of each page in the artifact $ARTIFACT"
+        exit 1
+      env:
+        FAIL_ON: ${{ inputs.fail-on }}
+        ARTIFACT: ${{ steps.check.outputs.artifact }}

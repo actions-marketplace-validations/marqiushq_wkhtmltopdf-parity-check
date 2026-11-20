@@ -1,0 +1,5 @@
+.DS_Store
+# reports the action writes when its tests run
+/wkhtmltopdf-parity/
+/report-*/
+/out/

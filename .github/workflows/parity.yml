@@ -1,0 +1,14 @@
+name: PDF parity
+on: [push, pull_request]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: marqiushq/wkhtmltopdf-parity-check@v1
+        with:
+          pages: templates/*.html
+          options: --page-size A4 --margin-top 12mm --enable-local-file-access
