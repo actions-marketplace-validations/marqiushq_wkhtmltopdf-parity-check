@@ -1,6 +1,14 @@
-# wkhtmltopdf parity check: compare PDFs
+# wkhtmltopdf parity check: compare your PDFs before you replace wkhtmltopdf
 
-**Replacing wkhtmltopdf? Compare every PDF before you switch.** This GitHub Action makes your own HTML templates into PDFs with wkhtmltopdf 0.12.6 and with marqius-wkhtmltopdf, the maintained drop-in wkhtmltopdf alternative, compares every page, posts the result on the pull request and fails the build on the differences you choose. The invoices, quotations, statements and reports your customers receive are proven before the switch, not after it.
+**What it is.** A GitHub Action. On every pull request it turns your own HTML templates into PDFs twice, once with the original wkhtmltopdf 0.12.6 and once with marqius-wkhtmltopdf, its maintained drop-in replacement. Then it compares every page and gives you one answer: **GO, REVIEW or NO-GO.**
+
+**Why it matters.** Your customers read your invoices, quotations and statements. A total that moves by a cent, a line that goes missing or a table row that jumps to the next page is a real problem. This check finds such changes before you switch, and after the switch it keeps checking every change you make to a template.
+
+## Set it up in three steps
+
+**1. Put the HTML of the documents your app prints in your repository,** for example in `templates/`, with the pictures and style sheets they load.
+
+**2. Add this file to your repository as `.github/workflows/pdf-parity.yml`:**
 
 ```yaml
 name: PDF parity
@@ -19,7 +27,15 @@ jobs:
           options: --page-size A4 --margin-top 12mm --enable-local-file-access
 ```
 
-Name your templates in `pages` and the options your application passes in `options`. That is all it needs. `pull-requests: write` lets it post the result on the pull request.
+Change `pages` to where your templates are, and `options` to the options your app passes to wkhtmltopdf.
+
+**3. Open a pull request.** The check runs and posts its result on the pull request.
+
+### What the answer means
+
+- **GO:** nothing blocking and nothing to look at. The PDFs say the same thing.
+- **REVIEW:** nothing blocking, but something worth a look, such as another number of pages or a page that begins at another word.
+- **NO-GO:** the content differs: a word, a number, a date or a picture is missing, new or changed. The report shows exactly where.
 
 ## What you get
 
